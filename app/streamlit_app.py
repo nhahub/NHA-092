@@ -268,11 +268,8 @@ def predict(df):
 # MAIN UI LAYOUT
 # ========================================
 
-# Header with sidebar toggle
-header_col1, header_col2 = st.columns([0.1, 0.9])
-with header_col1:
-    if st.button("☰", help="Toggle Sidebar", key="sidebar_toggle"):
-        st.session_state.sidebar_open = not st.session_state.get("sidebar_open", True)
+
+
 
 # Header
 st.markdown("""
