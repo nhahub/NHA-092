@@ -3,7 +3,7 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
-*.pkl
+
 
 # Virtual environment
 .venv/
