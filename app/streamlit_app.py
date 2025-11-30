@@ -4,8 +4,7 @@ import pandas as pd
 from keras.models import load_model
 from datetime import datetime
 from pathlib import Path
-import plotly.express as px
-import plotly.graph_objects as go
+
 
 # =========================================================
 # Page Configuration & Styling
