@@ -1,22 +1,11 @@
-# Sales Forecasting App - Streamlit Deployment
-# app.py
-
-"""
-Sales Forecasting and Demand Prediction - Streamlit Dashboard
-Milestone 4: Deployment
-Deploy to: Railway / Streamlit Cloud
-"""
-
 import streamlit as st
 import pandas as pd
 import numpy as np
+from pathlib import Path
 import pickle
-import plotly.express as px
-import plotly.graph_objects as go
-from datetime import datetime, timedelta
-import json
-import os
-import sys
+import joblib
+import tensorflow as tf
+from tensorflow import keras
 
 # Page configuration
 st.set_page_config(
@@ -26,7 +15,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS
+# Enhanced Custom CSS for professional styling
 st.markdown("""
     <style>
     .main {
@@ -36,530 +25,679 @@ st.markdown("""
         padding: 1rem;
         margin: 1rem 0;
     }
+    .stButton>button {
+        width: 100%;
+        border-radius: 8px;
+        height: 3em;
+        font-weight: 600;
+        transition: all 0.3s ease;
+    }
+    .stButton>button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    }
+    .prediction-box {
+        padding: 20px;
+        border-radius: 10px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        text-align: center;
+        margin: 20px 0;
+    }
     h1 {
         color: #1f77b4;
+        font-weight: 700;
         padding-bottom: 1rem;
+    }
+    h2 {
+        color: #1f77b4;
+        font-weight: 600;
+    }
+    h3 {
+        color: #2c3e50;
+        font-weight: 600;
+    }
+    div[data-testid="stMetricValue"] {
+        font-size: 28px;
+        font-weight: 600;
+    }
+    .success-box {
+        padding: 15px;
+        border-radius: 8px;
+        background-color: #d1fae5;
+        border-left: 4px solid #10b981;
+        margin: 10px 0;
     }
     .metric-card {
         background-color: #f0f2f6;
-        padding: 1rem;
+        padding: 1.5rem;
         border-radius: 0.5rem;
         margin: 0.5rem 0;
+        border: 1px solid #e0e0e0;
+        transition: all 0.3s ease;
+    }
+    .metric-card:hover {
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        transform: translateY(-2px);
+    }
+    .metric-card h3 {
+        margin-top: 0;
+        color: #1f77b4;
+    }
+    .metric-card p {
+        margin-bottom: 0;
+        color: #6b7280;
+    }
+    .info-section {
+        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+        padding: 1.5rem;
+        border-radius: 10px;
+        margin: 1rem 0;
+    }
+    .feature-explanation {
+        background-color: #f8f9fa;
+        padding: 1rem;
+        border-radius: 8px;
+        border-left: 4px solid #1f77b4;
+        margin: 0.5rem 0;
+    }
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 8px 8px 0 0;
+        padding: 10px 20px;
     }
     </style>
 """, unsafe_allow_html=True)
 
-# ============================================================================
-# 1. LOAD MODEL AND RESOURCES
-# ============================================================================
 
-@st.cache_resource
-def load_model():
-    """Load the trained model"""
-    try:
-        # Try loading from multiple possible locations
-        model_files = [
-            'best_model_xgboost.pkl',
-            'best_model_lightgbm.pkl',
-            'best_model_random_forest.pkl',
-            'model.pkl',
-            'feature_columns_20251122_103557.pkl'
-        ]
-        
-        for model_file in model_files:
-            if os.path.exists(model_file):
-                with open(model_file, 'rb') as f:
-                    model = pickle.load(f)
-                return model, model_file
-        
-        st.error("❌ No model file found!")
-        return None, None
-    except Exception as e:
-        st.error(f"❌ Error loading model: {str(e)}")
-        return None, None
-
-@st.cache_resource
-def load_scaler():
-    """Load the feature scaler"""
-    try:
-        if os.path.exists('feature_scaler.pkl'):
-            with open('feature_scaler.pkl', 'rb') as f:
-                scaler = pickle.load(f)
-            return scaler
-        return None
-    except Exception as e:
-        st.warning(f"⚠️ Could not load scaler: {str(e)}")
-        return None
-
-@st.cache_resource
-def load_metadata():
-    """Load model metadata"""
-    try:
-        if os.path.exists('model_metadata.json'):
-            with open('model_metadata.json', 'r') as f:
-                metadata = json.load(f)
-            return metadata
-        return None
-    except Exception as e:
-        st.warning(f"⚠️ Could not load metadata: {str(e)}")
-        return None
-
-@st.cache_data
-def load_feature_names():
-    """Load feature names"""
-    try:
-        if os.path.exists('feature_names.txt'):
-            with open('feature_names.txt', 'r') as f:
-                features = [line.strip() for line in f.readlines()]
-            return features
-        return None
-    except Exception as e:
-        st.warning(f"⚠️ Could not load feature names: {str(e)}")
-        return None
-
-@st.cache_data
-def load_sample_data():
-    """Load sample data for demonstration"""
-    try:
-        if os.path.exists('train_processed.csv'):
-            df = pd.read_csv('train_processed.csv')
-            df['date'] = pd.to_datetime(df['date'])
-            return df.tail(1000)  # Load last 1000 rows for demo
-        return None
-    except Exception as e:
-        st.warning(f"⚠️ Could not load sample data: {str(e)}")
-        return None
-
-# Load all resources
-model, model_filename = load_model()
-scaler = load_scaler()
-feature_names = load_feature_names()
-sample_data = load_sample_data()
-
-# ============================================================================
-# 2. SIDEBAR - NAVIGATION
-# ============================================================================
-
-st.sidebar.title("📊 Sales Forecasting")
-st.sidebar.markdown("---")
-
-page = st.sidebar.radio(
-    "Navigation",
-    ["🏠 Home", "🔮 Make Predictions", "📈 Batch Forecast", "ℹ️ About"]
-)
-
-
-# ============================================================================
-# 3. HOME PAGE
-# ============================================================================
-
-if page == "🏠 Home":
-    st.title("🏠 Sales Forecasting Dashboard")
-    st.markdown("### Welcome to the Sales Demand Prediction System")
+class SalesPredictionApp:
+    """Sales prediction application using neural network model"""
     
-    col1, col2, col3 = st.columns(3)
+    def __init__(self):
+        # Define paths
+        self.base_dir = Path(__file__).parent.parent
+        self.models_dir = self.base_dir / "models"
+        self.artifacts_dir = self.base_dir / "artifacts"
+        
+        # Model path
+        self.model_path = self.models_dir / "model_nn.keras"
+        
+        # Initialize session state
+        self.initialize_session_state()
     
-    with col1:
-        st.markdown("""
-        <div class="metric-card">
-            <h3>🎯 Accurate Predictions</h3>
-            <p>ML-powered forecasting with high accuracy</p>
-        </div>
-        """, unsafe_allow_html=True)
+    def initialize_session_state(self):
+        """Initialize all session state variables"""
+        if 'model' not in st.session_state:
+            st.session_state.model = None
+        if 'model_loaded' not in st.session_state:
+            st.session_state.model_loaded = False
+        if 'prediction_history' not in st.session_state:
+            st.session_state.prediction_history = []
+        if 'scalers' not in st.session_state:
+            st.session_state.scalers = {}
+        if 'last_prediction_df' not in st.session_state:
+            st.session_state.last_prediction_df = None
     
-    with col2:
-        st.markdown("""
-        <div class="metric-card">
-            <h3>⚡ Real-time Results</h3>
-            <p>Get instant predictions for your sales data</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col3:
-        st.markdown("""
-        <div class="metric-card">
-            <h3>📊 Interactive Visualizations</h3>
-            <p>Explore trends and patterns in your forecasts</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    st.markdown("---")
-    
-    # Quick start guide
-    st.markdown("### 🚀 Quick Start Guide")
-    
-    st.markdown("""
-    1. **🔮 Make Predictions** - Enter sales data manually for single predictions
-    2. **📈 Batch Forecast** - Upload CSV file for multiple predictions
-    3. **ℹ️ About** - Learn more about the project
-    """)
-    
-    # Sample data preview
-    if sample_data is not None:
-        st.markdown("---")
-        st.markdown("### 📋 Sample Data Preview")
-        st.dataframe(sample_data.head(10), use_container_width=True)
-
-# ============================================================================
-# 4. MAKE PREDICTIONS PAGE
-# ============================================================================
-
-elif page == "🔮 Make Predictions":
-    st.title("🔮 Make Sales Predictions")
-    st.markdown("### Enter the details below to get a sales forecast")
-    
-    # Add feature explanation section
-    with st.expander("ℹ️ What do these features mean?", expanded=False):
-        st.markdown("""
-        ### 📋 Feature Descriptions
-        
-        **Basic Information:**
-        - **Store Number** (1-54): Unique identifier for each store location
-        - **Date**: The date for which you want to predict sales
-        - **Product Family**: Category of products (e.g., GROCERY, BEVERAGES, DAIRY)
-        
-        **Store Characteristics:**
-        - **Store Type** (A-E): Classification of store size and format
-          - Type A: Largest stores
-          - Type E: Smallest stores
-        - **Store Cluster** (1-17): Grouping of similar stores based on characteristics
-        
-        **Economic Factors:**
-        - **Oil Price**: Daily oil price in USD
-          - Ecuador's economy is oil-dependent
-          - Higher oil prices typically mean higher consumer spending
-          - Affects transportation costs and consumer behavior
-        
-        **Sales Indicators:**
-        - **Items on Promotion**: Number of items from this product family currently on promotion
-          - Promotions typically increase sales by 20-40%
-          - Important for demand forecasting
-        
-        - **Transactions**: Total number of customer transactions at the store that day
-          - Higher transactions usually mean higher sales
-          - Indicates store traffic and customer activity
-        
-        **Special Events:**
-        - **Is Holiday?**: Whether the date is a national or local holiday
-          - Holidays significantly impact sales patterns
-          - Some product families sell more (celebrations), others less (offices closed)
-        
-        ---
-        
-        ### 🧠 How the Model Uses These Features:
-        
-        The model combines these inputs with **engineered features** like:
-        - **Historical patterns**: Sales from previous weeks/months
-        - **Seasonality**: Day of week, month, quarter effects
-        - **Trends**: Overall sales trends over time
-        - **Interactions**: How promotions work differently on holidays
-        - **Rolling averages**: Recent sales performance
-        
-        All these factors together help predict future sales accurately! 📊
-        """)
-    
-    if model is None:
-        st.error("❌ Model not loaded! Please ensure model file exists.")
-        st.stop()
-    
-    # Create input form
-    with st.form("prediction_form"):
-        st.markdown("#### 📝 Input Features")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.markdown("**🏪 Store Information**")
-            store_nbr = st.number_input(
-                "Store Number", 
-                min_value=1, 
-                max_value=54, 
-                value=1,
-                help="Enter the store number (1-54). Different stores have different sales patterns."
-            )
-            
-            date = st.date_input(
-                "Date", 
-                value=datetime.now(),
-                help="Select the date for prediction. Weekends and holidays have different patterns."
-            )
-            
-            onpromotion = st.number_input(
-                "Items on Promotion", 
-                min_value=0, 
-                value=0,
-                help="Number of items from this product family currently on promotion. Promotions typically boost sales by 20-40%."
-            )
-        
-        with col2:
-            st.markdown("**📦 Product & Store Details**")
-            family = st.selectbox(
-                "Product Family",
-                ["AUTOMOTIVE", "BABY CARE", "BEAUTY", "BEVERAGES", "BOOKS", 
-                 "BREAD/BAKERY", "CELEBRATION", "CLEANING", "DAIRY", "DELI",
-                 "EGGS", "FROZEN FOODS", "GROCERY I", "GROCERY II", "HARDWARE",
-                 "HOME AND KITCHEN I", "HOME AND KITCHEN II", "HOME APPLIANCES",
-                 "HOME CARE", "LADIESWEAR", "LAWN AND GARDEN", "LINGERIE",
-                 "LIQUOR,WINE,BEER", "MAGAZINES", "MEATS", "PERSONAL CARE",
-                 "PET SUPPLIES", "PLAYERS AND ELECTRONICS", "POULTRY", "PREPARED FOODS",
-                 "PRODUCE", "SCHOOL AND OFFICE SUPPLIES", "SEAFOOD"],
-                help="Select the product category. Different families have different sales volumes and patterns."
-            )
-            
-            store_type = st.selectbox(
-                "Store Type", 
-                ["A", "B", "C", "D", "E"],
-                help="Store classification: A (Largest) to E (Smallest). Larger stores typically have higher sales."
-            )
-            
-            cluster = st.number_input(
-                "Store Cluster", 
-                min_value=1, 
-                max_value=17, 
-                value=1,
-                help="Cluster number (1-17). Stores in the same cluster have similar characteristics."
-            )
-        
-        with col3:
-            st.markdown("**💰 Economic & Activity Indicators**")
-            oil_price = st.number_input(
-                "Oil Price (USD)", 
-                min_value=0.0, 
-                value=50.0, 
-                step=0.1,
-                help="Daily oil price affects consumer spending. Typical range: $30-$110. Ecuador's economy is oil-dependent."
-            )
-            
-            
-            is_holiday = st.checkbox(
-                "Is Holiday?",
-                help="Check if this date is a national or local holiday. Holidays significantly affect sales patterns."
-            )
-        
-        
-        submit_button = st.form_submit_button("🔮 Predict Sales", use_container_width=True)
-    
-    if submit_button:
-        with st.spinner("🔄 Making prediction..."):
-            try:
-                # Create feature dictionary (simplified version)
-                # In production, you'd need to calculate all engineered features
-                
-                # Extract date features
-                date_obj = pd.to_datetime(date)
-                year = date_obj.year
-                month = date_obj.month
-                day = date_obj.day
-                day_of_week = date_obj.dayofweek
-                week_of_year = date_obj.isocalendar()[1]
-                quarter = (month - 1) // 3 + 1
-                is_weekend = 1 if day_of_week in [5, 6] else 0
-                
-                # This is a simplified example
-                # You would need to create all the features your model expects
-                st.warning("""
-                ⚠️ **Note:** For accurate predictions, this requires all engineered features from training.
-                This demo shows the interface structure. In production, you'd need to:
-                1. Load the complete feature engineering pipeline
-                2. Calculate all lag features, rolling statistics, etc.
-                3. Use the exact same preprocessing as training
-                """)
-                
-                # Mock prediction for demonstration
-                mock_prediction = np.random.uniform(10, 1000)
-                
-                # Display results
-                st.success("✅ Prediction Complete!")
-                
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Predicted Sales", f"{mock_prediction:.2f}", "units")
-                with col2:
-                    confidence = 0.85
-                    st.metric("Confidence", f"{confidence:.1%}", "")
-                with col3:
-                    st.metric("Store", store_nbr, f"Type {store_type}")
-                
-                # Visualization
-                st.markdown("### 📊 Prediction Breakdown")
-                
-                # Create a sample breakdown chart
-                breakdown_data = pd.DataFrame({
-                    'Factor': ['Base Sales', 'Promotion Effect', 'Seasonality', 'Store Type', 'Other'],
-                    'Impact': [mock_prediction * 0.4, mock_prediction * 0.2, mock_prediction * 0.15, 
-                              mock_prediction * 0.15, mock_prediction * 0.1]
-                })
-                
-                fig = px.bar(breakdown_data, x='Factor', y='Impact', 
-                           title='Contribution to Predicted Sales',
-                           color='Impact', color_continuous_scale='Blues')
-                st.plotly_chart(fig, use_container_width=True)
-                
-            except Exception as e:
-                st.error(f"❌ Prediction error: {str(e)}")
-
-# ============================================================================
-# 5. BATCH FORECAST PAGE
-# ============================================================================
-
-elif page == "📈 Batch Forecast":
-    st.title("📈 Batch Sales Forecast")
-    st.markdown("### Upload a CSV file to get predictions for multiple records")
-    
-    if model is None:
-        st.error("❌ Model not loaded! Please ensure model file exists.")
-        st.stop()
-    
-    # File uploader
-    uploaded_file = st.file_uploader(
-        "Upload CSV file with sales data",
-        type=['csv'],
-        help="CSV should contain: store_nbr, family, date, onpromotion, etc."
-    )
-    
-    if uploaded_file is not None:
+    def load_model(self):
+        """Load the Keras model"""
         try:
-            # Read uploaded file
-            df_upload = pd.read_csv(uploaded_file)
+            if not self.model_path.exists():
+                st.error(f"❌ Model not found at: {self.model_path}")
+                return False
             
-            st.success(f"✅ File uploaded successfully! {len(df_upload)} records found.")
+            st.session_state.model = keras.models.load_model(self.model_path)
+            st.session_state.model_loaded = True
+            return True
+        except Exception as e:
+            st.error(f"❌ Error loading model: {str(e)}")
+            return False
+    
+    def get_available_scalers(self):
+        """Get list of available scaler files"""
+        if not self.artifacts_dir.exists():
+            return {}
+        
+        scalers = {}
+        for f in self.artifacts_dir.glob("scaler_*.pkl"):
+            scalers[f.name] = f
+        return scalers
+    
+    def load_all_scalers(self):
+        """Load all available scalers"""
+        available_scalers = self.get_available_scalers()
+        loaded_count = 0
+        
+        for name, path in available_scalers.items():
+            loaded = False
+            last_error = None
             
-            # Show preview
-            st.markdown("### 📋 Data Preview")
-            st.dataframe(df_upload.head(10), use_container_width=True)
+            # Method 1: Try joblib first (scikit-learn scalers are often saved with joblib)
+            try:
+                scaler = joblib.load(path)
+                st.session_state.scalers[name] = scaler
+                loaded_count += 1
+                loaded = True
+            except Exception as e1:
+                last_error = f"joblib: {str(e1)}"
+                
+                # Method 2: Try pickle with default protocol
+                try:
+                    with open(path, 'rb') as f:
+                        scaler = pickle.load(f)
+                    st.session_state.scalers[name] = scaler
+                    loaded_count += 1
+                    loaded = True
+                except Exception as e2:
+                    last_error = f"pickle: {str(e2)}"
+                    
+                    # Method 3: Try pickle with latin1 encoding (for Python 2/3 compatibility)
+                    try:
+                        with open(path, 'rb') as f:
+                            scaler = pickle.load(f, encoding='latin1')
+                        st.session_state.scalers[name] = scaler
+                        loaded_count += 1
+                        loaded = True
+                    except Exception as e3:
+                        last_error = f"pickle(latin1): {str(e3)}"
             
-            # Make predictions button
-            if st.button("🔮 Generate Predictions", use_container_width=True):
-                with st.spinner("🔄 Processing predictions..."):
-                    # Mock predictions for demo
-                    predictions = np.random.uniform(10, 1000, size=len(df_upload))
-                    df_upload['predicted_sales'] = predictions
+            if not loaded:
+                failed_scalers.append((name, last_error))
+        
+        # Report failures if any
+        if failed_scalers:
+            for name, error in failed_scalers:
+                st.warning(f"⚠️ Could not load {name}: {error}")
+        
+        return loaded_count
+    
+    def predict_sales(self, df, use_scaling=True):
+        """Make sales predictions on the dataframe"""
+        try:
+            # Get the feature data
+            feature_data = df.values
+            
+            # Apply scaling if requested and scalers are loaded
+            if use_scaling and st.session_state.scalers:
+                # This is a simplified version - you may need to apply different scalers to different columns
+                # For now, we'll use the first available scaler
+                scaler_name = list(st.session_state.scalers.keys())[0]
+                scaler = st.session_state.scalers[scaler_name]
+                feature_data = scaler.transform(feature_data)
+            
+            # Make predictions
+            predictions = st.session_state.model.predict(feature_data, verbose=0)
+            return predictions.flatten()
+            
+        except Exception as e:
+            st.error(f"❌ Prediction error: {str(e)}")
+            raise
+    
+    def render_sidebar(self):
+        """Render sidebar configuration"""
+        with st.sidebar:
+            # Enhanced Header
+            st.markdown("""
+            <div style='text-align: center; padding: 1rem 0;'>
+                <h1 style='color: #1f77b4; margin-bottom: 0.5rem;'>📊 Sales Forecasting</h1>
+                <p style='color: #6b7280; font-size: 0.9rem;'>AI-Powered Prediction System</p>
+            </div>
+            """, unsafe_allow_html=True)
+            st.markdown("---")
+            
+            # Model Loading with enhanced display
+            st.markdown("### 🤖 Model Status")
+            status = "✅ Loaded" if st.session_state.model_loaded else "❌ Not Loaded"
+            status_color = "#10b981" if st.session_state.model_loaded else "#ef4444"
+            st.markdown(f"""
+            <div style='padding: 0.75rem; background-color: #f0f2f6; border-radius: 0.5rem; border-left: 4px solid {status_color};'>
+                <strong>Status:</strong> {status}
+            </div>
+            """, unsafe_allow_html=True)
+            
+            if st.button("🔄 Load Model", use_container_width=True):
+                with st.spinner("🔄 Loading model..."):
+                    if self.load_model():
+                        st.success("✅ Model loaded successfully!")
+                        model = st.session_state.model
+                        st.markdown(f"""
+                        <div style='padding: 0.75rem; background-color: #f0f2f6; border-radius: 0.5rem;'>
+                            <strong>Input Features:</strong> {model.input_shape[-1]}<br>
+                            <strong>Parameters:</strong> {model.count_params():,}
+                        </div>
+                        """, unsafe_allow_html=True)
+            
+            st.markdown("---")
+            
+            # Scaler Loading with enhanced display
+            st.markdown("### 📊 Feature Scalers")
+            available_scalers = self.get_available_scalers()
+            
+            if available_scalers:
+                st.markdown(f"""
+                <div style='padding: 0.75rem; background-color: #eff6ff; border-radius: 0.5rem; border-left: 4px solid #3b82f6;'>
+                    Found <strong>{len(available_scalers)}</strong> scaler(s)
+                </div>
+                """, unsafe_allow_html=True)
+                
+                if st.button("📥 Load All Scalers", use_container_width=True):
+                    with st.spinner("Loading scalers..."):
+                        count = self.load_all_scalers()
+                        if count > 0:
+                            st.success(f"✅ Loaded {count} scaler(s)!")
+                            with st.expander("View loaded scalers", expanded=False):
+                                for name in st.session_state.scalers.keys():
+                                    st.caption(f"• {name}")
+                
+                if st.session_state.scalers:
+                    st.markdown(f"""
+                    <div style='padding: 0.75rem; background-color: #d1fae5; border-radius: 0.5rem; border-left: 4px solid #10b981;'>
+                        ✅ <strong>{len(st.session_state.scalers)}</strong> scaler(s) active
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                st.warning("⚠️ No scalers found in artifacts/")
+            
+            st.markdown("---")
+            
+            # Enhanced Info Section
+            st.markdown("### ℹ️ How to Use")
+            with st.expander("📖 Quick Start Guide", expanded=False):
+                st.markdown("""
+                **Step-by-Step:**
+                1. **Load Model** - Click the "Load Model" button above
+                2. **Load Scalers** (Optional) - Load feature scalers for better accuracy
+                3. **Upload CSV** - Upload your CSV file with all required features
+                4. **Configure** - Set prediction options (scaling, etc.)
+                5. **Predict** - Click "Predict Sales" to generate forecasts
+                6. **Download** - Download results with IDs and predicted sales
+                
+                **CSV Requirements:**
+                - ✅ Must contain all required features
+                - ✅ No missing values
+                - ✅ Correct column order
+                - ✅ Proper data types
+                """)
+            
+            st.markdown("---")
+            
+            # Statistics
+            if st.session_state.prediction_history:
+                st.subheader("📊 Session Stats")
+                st.metric("Total Predictions", len(st.session_state.prediction_history))
+            
+            st.markdown("---")
+            st.caption("v1.0 | Sales Forecasting System")
+    
+    def render_main_content(self):
+        """Render main prediction interface"""
+        st.header("🔮 Sales Prediction System")
+        st.markdown("### Upload your CSV file to predict sales using AI-powered forecasting")
+        
+        if not st.session_state.model_loaded:
+            st.warning("⚠️ **Please load the model from the sidebar first!**")
+            st.info("👈 Click 'Load Model' in the sidebar to get started")
+            
+            # Show feature cards
+            st.markdown("---")
+            st.markdown("### 🎯 Key Features")
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.markdown("""
+                <div class="metric-card">
+                    <h3>🎯 Accurate Predictions</h3>
+                    <p>Neural network-powered forecasting with high accuracy</p>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col2:
+                st.markdown("""
+                <div class="metric-card">
+                    <h3>⚡ Real-time Results</h3>
+                    <p>Get instant predictions for your sales data</p>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col3:
+                st.markdown("""
+                <div class="metric-card">
+                    <h3>📊 Batch Processing</h3>
+                    <p>Process multiple records efficiently</p>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            return
+        
+        st.markdown("---")
+        
+        # Feature explanation section
+        with st.expander("ℹ️ Understanding Sales Prediction Features", expanded=False):
+            st.markdown("""
+            ### 📋 Feature Descriptions
+            
+            **Basic Information:**
+            - **Store Number** (1-54): Unique identifier for each store location
+            - **Date**: The date for which you want to predict sales
+            - **Product Family**: Category of products (e.g., GROCERY, BEVERAGES, DAIRY)
+            
+            **Store Characteristics:**
+            - **Store Type** (A-E): Classification of store size and format
+              - Type A: Largest stores
+              - Type E: Smallest stores
+            - **Store Cluster** (1-17): Grouping of similar stores based on characteristics
+            
+            **Economic Factors:**
+            - **Oil Price**: Daily oil price in USD
+              - Ecuador's economy is oil-dependent
+              - Higher oil prices typically mean higher consumer spending
+              - Affects transportation costs and consumer behavior
+            
+            **Sales Indicators:**
+            - **Items on Promotion**: Number of items from this product family currently on promotion
+              - Promotions typically increase sales by 20-40%
+              - Important for demand forecasting
+            
+            - **Transactions**: Total number of customer transactions at the store that day
+              - Higher transactions usually mean higher sales
+              - Indicates store traffic and customer activity
+            
+            **Special Events:**
+            - **Is Holiday?**: Whether the date is a national or local holiday
+              - Holidays significantly impact sales patterns
+              - Some product families sell more (celebrations), others less (offices closed)
+            
+            ---
+            
+            ### 🧠 How the Model Uses These Features:
+            
+            The neural network model combines these inputs with **engineered features** like:
+            - **Historical patterns**: Sales from previous weeks/months
+            - **Seasonality**: Day of week, month, quarter effects
+            - **Trends**: Overall sales trends over time
+            - **Interactions**: How promotions work differently on holidays
+            - **Rolling averages**: Recent sales performance
+            
+            All these factors together help predict future sales accurately! 📊
+            """)
+        
+        # File uploader with better styling
+        st.markdown("### 📁 Upload Your Data")
+        uploaded_file = st.file_uploader(
+            "Choose CSV file with features",
+            type=['csv'],
+            help="Upload a CSV file containing the feature columns needed for prediction. The file should have all required features in the correct order."
+        )
+        
+        if uploaded_file is not None:
+            try:
+                # Read the CSV file
+                df = pd.read_csv(uploaded_file)
+                original_df = df.copy()  # Keep original for final output
+                
+                # Display data info with enhanced styling
+                st.markdown("### 📋 Data Preview & Validation")
+                
+                col1, col2 = st.columns([3, 1])
+                
+                with col1:
+                    st.markdown("**Uploaded Data Preview**")
+                    st.dataframe(df.head(20), use_container_width=True, height=300)
+                
+                with col2:
+                    st.markdown("**📊 Data Statistics**")
+                    st.metric("Total Rows", f"{len(df):,}")
+                    st.metric("Columns", len(df.columns))
                     
-                    st.success("✅ Predictions generated!")
+                    model_features = st.session_state.model.input_shape[-1]
+                    st.metric("Required Features", model_features)
                     
-                    # Display results
-                    st.markdown("### 📊 Prediction Results")
-                    st.dataframe(df_upload, use_container_width=True)
+                    st.markdown("---")
+                    if len(df.columns) == model_features:
+                        st.success("✅ **Column count matches!**")
+                    else:
+                        st.error(f"❌ **Mismatch!** Expected {model_features}, got {len(df.columns)}")
+                
+                st.markdown("---")
+                
+                # Prediction options with better layout
+                st.markdown("### ⚙️ Prediction Configuration")
+                
+                col_a, col_b, col_c = st.columns([2, 1, 1])
+                
+                with col_a:
+                    st.markdown("**Configure your prediction settings**")
+                    use_scaling = st.checkbox(
+                        "Apply Feature Scaling",
+                        value=len(st.session_state.scalers) > 0,
+                        disabled=len(st.session_state.scalers) == 0,
+                        help="Apply loaded scalers to normalize features. This improves prediction accuracy when scalers are available."
+                    )
+                    if len(st.session_state.scalers) == 0:
+                        st.caption("ℹ️ No scalers loaded. Scaling disabled.")
+                
+                with col_b:
+                    st.markdown("**Ready to predict?**")
+                    st.markdown("")  # Spacing
+                
+                with col_c:
+                    st.markdown("")  # Spacing
+                    st.markdown("")  # Spacing
+                    if st.button("🚀 Predict Sales", use_container_width=True, type="primary"):
+                        # Validate data shape
+                        if len(df.columns) != model_features:
+                            st.error(f"❌ Column mismatch! Expected {model_features} columns, got {len(df.columns)}")
+                        else:
+                            with st.spinner("🔮 Predicting sales..."):
+                                try:
+                                    # Make predictions
+                                    predictions = self.predict_sales(df, use_scaling)
+                                    
+                                    # Add predictions to original dataframe
+                                    result_df = original_df.copy()
+                                    result_df['predicted_sales'] = predictions
+                                    
+                                    # Store in session state
+                                    st.session_state.last_prediction_df = result_df
+                                    
+                                    # Add to history
+                                    st.session_state.prediction_history.append({
+                                        'timestamp': pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                        'rows': len(result_df),
+                                        'mean_sales': predictions.mean(),
+                                        'total_sales': predictions.sum()
+                                    })
+                                    
+                                    st.success("✅ Predictions completed successfully!")
+                                    
+                                except Exception as e:
+                                    st.error(f"Error during prediction: {str(e)}")
+                
+                # Display results if available
+                if st.session_state.last_prediction_df is not None:
+                    st.markdown("---")
+                    st.markdown("### 📈 Prediction Results")
+                    st.success("✅ Predictions completed successfully! Review the results below.")
                     
-                    # Summary statistics
+                    result_df = st.session_state.last_prediction_df
+                    predictions = result_df['predicted_sales'].values
+                    
+                    # Enhanced Statistics with better presentation
+                    st.markdown("#### 📊 Summary Statistics")
                     col1, col2, col3, col4 = st.columns(4)
                     with col1:
-                        st.metric("Total Records", len(df_upload))
+                        st.metric(
+                            "Total Predicted Sales", 
+                            f"{predictions.sum():,.2f}",
+                            help="Sum of all predicted sales values"
+                        )
                     with col2:
-                        st.metric("Avg Predicted Sales", f"{predictions.mean():.2f}")
+                        st.metric(
+                            "Average Sales", 
+                            f"{predictions.mean():,.2f}",
+                            help="Mean of all predicted sales values"
+                        )
                     with col3:
-                        st.metric("Min Prediction", f"{predictions.min():.2f}")
+                        st.metric(
+                            "Min Sales", 
+                            f"{predictions.min():,.2f}",
+                            help="Minimum predicted sales value"
+                        )
                     with col4:
-                        st.metric("Max Prediction", f"{predictions.max():.2f}")
+                        st.metric(
+                            "Max Sales", 
+                            f"{predictions.max():,.2f}",
+                            help="Maximum predicted sales value"
+                        )
                     
-                    # Visualizations
-                    st.markdown("### 📈 Forecast Visualization")
+                    st.markdown("---")
                     
-                    if 'date' in df_upload.columns:
-                        df_upload['date'] = pd.to_datetime(df_upload['date'])
-                        daily_forecast = df_upload.groupby('date')['predicted_sales'].sum().reset_index()
-                        
-                        fig = px.line(daily_forecast, x='date', y='predicted_sales',
-                                    title='Daily Sales Forecast',
-                                    labels={'predicted_sales': 'Predicted Sales', 'date': 'Date'})
-                        st.plotly_chart(fig, use_container_width=True)
+                    # Display results table with enhanced styling
+                    st.markdown("#### 📊 Complete Results Table")
+                    st.dataframe(result_df, use_container_width=True, height=400)
                     
-                    # Download predictions
-                    csv = df_upload.to_csv(index=False)
+                    st.markdown("---")
+                    
+                    # Prepare download CSV with id and predicted_sales
+                    st.markdown("#### 💾 Download Predictions")
+                    st.info("💡 The download file will contain IDs (starting from 3000888) and predicted sales values.")
+                    
+                    # Create IDs starting from 3000888
+                    start_id = 3000888
+                    ids = range(start_id, start_id + len(predictions))
+                    
+                    download_df = pd.DataFrame({
+                        'id': ids,
+                        'predicted_sales': predictions
+                    })
+                    
+                    # Download button with better styling
+                    csv = download_df.to_csv(index=False)
                     st.download_button(
-                        label="📥 Download Predictions as CSV",
+                        label="📥 Download Predictions CSV (ID + Sales)",
                         data=csv,
-                        file_name=f"sales_predictions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        file_name=f"sales_predictions_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
                         mime="text/csv",
-                        use_container_width=True
+                        use_container_width=True,
+                        type="primary",
+                        help="Download the predictions as a CSV file with ID and predicted_sales columns"
                     )
+                    
+                    # Show preview of download file
+                    with st.expander("👁️ Preview Download File", expanded=False):
+                        st.markdown(f"**File Information:**")
+                        st.caption(f"• Total rows: {len(download_df):,}")
+                        st.caption(f"• ID range: {download_df['id'].min()} to {download_df['id'].max()}")
+                        st.caption(f"• Columns: id, predicted_sales")
+                        st.markdown("**Preview:**")
+                        st.dataframe(download_df.head(20), use_container_width=True)
+                
+            except Exception as e:
+                st.error(f"❌ Error reading file: {str(e)}")
+                st.exception(e)
+    
+    def render_history(self):
+        """Render prediction history"""
+        st.header("📜 Prediction History")
+        st.markdown("### View your past predictions and session statistics")
         
-        except Exception as e:
-            st.error(f"❌ Error processing file: {str(e)}")
+        if st.session_state.prediction_history:
+            history_df = pd.DataFrame(st.session_state.prediction_history)
+            
+            # Summary statistics with enhanced display
+            st.markdown("#### 📊 Session Summary")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric(
+                    "Total Predictions", 
+                    len(history_df),
+                    help="Number of prediction sessions in this history"
+                )
+            with col2:
+                total_rows = history_df['rows'].sum()
+                st.metric(
+                    "Total Rows Predicted", 
+                    f"{total_rows:,}",
+                    help="Total number of rows predicted across all sessions"
+                )
+            with col3:
+                avg_sales = history_df['mean_sales'].mean()
+                st.metric(
+                    "Avg Sales per Session", 
+                    f"{avg_sales:,.2f}",
+                    help="Average predicted sales per session"
+                )
+            
+            st.markdown("---")
+            
+            # History table
+            st.markdown("#### 📋 Detailed History")
+            st.dataframe(history_df, use_container_width=True, height=300)
+            
+            st.markdown("---")
+            
+            # Clear history button
+            col1, col2, col3 = st.columns([1, 1, 1])
+            with col2:
+                if st.button("🗑️ Clear History", use_container_width=True, type="secondary"):
+                    st.session_state.prediction_history = []
+                    st.session_state.last_prediction_df = None
+                    st.success("✅ History cleared!")
+                    st.rerun()
+        else:
+            st.markdown("---")
+            st.info("""
+            📭 **No prediction history yet!**
+            
+            To see your prediction history:
+            1. Go to the "🎯 Predict Sales" tab
+            2. Upload a CSV file
+            3. Make predictions
+            4. Your predictions will appear here
+            """)
     
-    else:
-        # Show sample CSV format
-        st.info("💡 Upload a CSV file to get started")
+    def run(self):
+        """Main application runner"""
+        # Enhanced Title Section
+        st.markdown("""
+        <div style='text-align: center; padding: 2rem 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; margin-bottom: 2rem;'>
+            <h1 style='color: white; margin-bottom: 0.5rem;'>📈 الحج المتنبيء</h1>
+            <p style='color: rgba(255,255,255,0.9); font-size: 1.1rem;'>AI-Powered Sales Prediction Platform</p>
+        </div>
+        """, unsafe_allow_html=True)
         
-        st.markdown("### 📝 Expected CSV Format")
-        sample_df = pd.DataFrame({
-            'store_nbr': [1, 2, 3],
-            'family': ['GROCERY I', 'BEVERAGES', 'DAIRY'],
-            'date': ['2024-01-01', '2024-01-01', '2024-01-01'],
-            'onpromotion': [5, 0, 3],
-            'dcoilwtico': [50.5, 50.5, 50.5]
-        })
-        st.dataframe(sample_df, use_container_width=True)
+        # Sidebar
+        self.render_sidebar()
+        
+        # Main content tabs with enhanced styling
+        tab1, tab2 = st.tabs([
+            "🎯 Predict Sales",
+            "📜 Prediction History"
+        ])
+        
+        with tab1:
+            self.render_main_content()
+        
+        with tab2:
+            self.render_history()
+        
+        # Enhanced Footer
+        st.markdown("---")
+        st.markdown("""
+        <div style='text-align: center; color: #6b7280; padding: 20px; background-color: #f9fafb; border-radius: 8px;'>
+            <p style='margin: 0; font-size: 0.9rem;'>
+                Built with ❤️ using <strong>TensorFlow</strong> & <strong>Streamlit</strong>
+            </p>
+            <p style='margin: 0.5rem 0 0 0; font-size: 0.85rem; color: #9ca3af;'>
+                Sales Forecasting System v1.0 | Powered by Neural Networks
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
 
 
-# ============================================================================
-# 6. ABOUT PAGE
-# ============================================================================
-
-elif page == "ℹ️ About":
-    st.title("ℹ️ About This Project")
-    
-    st.markdown("""
-    ### 📊 Sales Forecasting and Demand Prediction System
-    
-    This application uses Machine Learning to predict future sales and demand based on historical data,
-    helping businesses optimize inventory management, staffing, and marketing strategies.
-    
-    ---
-    
-    ### 🎯 Key Features
-    
-    - **Accurate Predictions**: ML-powered forecasting with multiple algorithms
-    - **Real-time Forecasting**: Get instant predictions for your sales data  
-    - **Batch Processing**: Upload CSV files for multiple predictions
-    - **Interactive Visualizations**: Explore trends and patterns
-    
-    ---
-    
-    ### 🛠️ Technology Stack
-    
-    - **Machine Learning**: XGBoost, LightGBM, Random Forest
-    - **Frontend**: Streamlit
-    - **Data Processing**: Pandas, NumPy
-    - **Visualization**: Plotly, Matplotlib
-    - **Deployment**: Railway
-    
-    ---
-    
-    ### 📈 Project Milestones
-    
-    1. ✅ **Data Collection & EDA** - Exploratory analysis and preprocessing
-    2. ✅ **Feature Engineering** - Advanced feature creation
-    3. ✅ **Model Development** - Training and optimization
-    4. ✅ **Deployment** - Web application deployment
-    
-    ---
-    
-    ### 📝 How to Use
-    
-    1. Navigate to **Make Predictions** for single forecasts
-    2. Use **Batch Forecast** to upload CSV files
-    """)
-    
-    # System information
-    st.markdown("---")
-    st.markdown("### 💻 System Information")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.info(f"""
-        **Python Version:** {sys.version[:7]}  
-        **Streamlit Version:** {st.__version__}  
-        **Model Status:** {'✅ Loaded' if model else '❌ Not Loaded'}
-        """)
-
-    # About Team
-    st.markdown("""
-    ## Our Team 
-    - **Abdelrahman Saeed** - [LinkedIn]
-    - **Abdelrahman Youssry** - [LinkedIn]
-    - **Farida Sabra** - [LinkedIn](https://www.linkedin.com/in/farida-sabra)
-    - **Hossam Eldin Mahmod** - [LinkedIn]
-    - **Rana Mohammed** - [LinkedIn]
-    - **Sara Basheer** - [LinkedIn]
-    """)
+# Run the application
+if __name__ == "__main__":
+    app = SalesPredictionApp()
+    app.run()
