@@ -7,6 +7,11 @@ import joblib
 import tensorflow as tf
 from tensorflow import keras
 
+@st.cache_data
+def convert_df_to_csv(df: pd.DataFrame) -> bytes:
+    """Convert DataFrame to CSV and cache it."""
+    return df.to_csv(index=False).encode('utf-8')
+
 # Page configuration
 st.set_page_config(
     page_title="Sales Forecasting Dashboard",
@@ -436,16 +441,18 @@ class SalesPredictionApp:
                 # Read the CSV file
                 df = pd.read_csv(uploaded_file)
                 original_df = df.copy()  # Keep original for final output
-                
+
+                # Initialize result_df to avoid UnboundLocalError
+                result_df = original_df.copy()
+
                 # Display data info with enhanced styling
                 st.markdown("### 📋 Data Preview & Validation")
-                
                 col1, col2 = st.columns([3, 1])
-                
+
                 with col1:
                     st.markdown("**Uploaded Data Preview**")
-                    st.dataframe(df.head(20), use_container_width=True, height=300)
-                
+                    st.dataframe(result_df.head(100), use_container_width=True, height=400)
+
                 with col2:
                     st.markdown("**📊 Data Statistics**")
                     st.metric("Total Rows", f"{len(df):,}")
@@ -459,34 +466,30 @@ class SalesPredictionApp:
                         st.success("✅ **Column count matches!**")
                     else:
                         st.error(f"❌ **Mismatch!** Expected {model_features}, got {len(df.columns)}")
-                
+
                 st.markdown("---")
-                
-                # Prediction options with better layout
+
+                # Prediction options
                 st.markdown("### ⚙️ Prediction Configuration")
-                
                 col_a, col_b, col_c = st.columns([2, 1, 1])
-                
+
                 with col_a:
                     st.markdown("**Configure your prediction settings**")
                     use_scaling = st.checkbox(
                         "Apply Feature Scaling",
                         value=len(st.session_state.scalers) > 0,
                         disabled=len(st.session_state.scalers) == 0,
-                        help="Apply loaded scalers to normalize features. This improves prediction accuracy when scalers are available."
+                        help="Apply loaded scalers to normalize features. Improves prediction accuracy if scalers are available."
                     )
                     if len(st.session_state.scalers) == 0:
                         st.caption("ℹ️ No scalers loaded. Scaling disabled.")
-                
+
                 with col_b:
                     st.markdown("**Ready to predict?**")
-                    st.markdown("")  # Spacing
-                
+
                 with col_c:
-                    st.markdown("")  # Spacing
-                    st.markdown("")  # Spacing
+                    st.markdown("")  # spacing
                     if st.button("🚀 Predict Sales", use_container_width=True, type="primary"):
-                        # Validate data shape
                         if len(df.columns) != model_features:
                             st.error(f"❌ Column mismatch! Expected {model_features} columns, got {len(df.columns)}")
                         else:
@@ -495,13 +498,16 @@ class SalesPredictionApp:
                                     # Make predictions
                                     predictions = self.predict_sales(df, use_scaling)
                                     
-                                    # Add predictions to original dataframe
-                                    result_df = original_df.copy()
+                                    # Add predictions to result_df
                                     result_df['predicted_sales'] = predictions
-                                    
-                                    # Store in session state
-                                    st.session_state.last_prediction_df = result_df
-                                    
+
+                                    # Store CSV in session_state for download
+                                    st.session_state.last_prediction_csv = result_df.to_csv(index=False)
+
+                                    # Show preview
+                                    st.markdown("### 📊 Data Preview (first 100 rows)")
+                                    st.dataframe(result_df.head(100), use_container_width=True, height=400)
+
                                     # Add to history
                                     st.session_state.prediction_history.append({
                                         'timestamp': pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -509,11 +515,30 @@ class SalesPredictionApp:
                                         'mean_sales': predictions.mean(),
                                         'total_sales': predictions.sum()
                                     })
-                                    
+
                                     st.success("✅ Predictions completed successfully!")
-                                    
+
                                 except Exception as e:
-                                    st.error(f"Error during prediction: {str(e)}")
+                                    st.error(f"❌ Error during prediction: {str(e)}")
+
+                # Download button
+                if 'last_prediction_csv' in st.session_state and st.session_state.last_prediction_csv is not None:
+                    st.markdown("---")
+                    st.markdown("#### 💾 Download Predictions")
+                    st.download_button(
+                        label="📥 Download CSV",
+                        data=st.session_state.last_prediction_csv,
+                        file_name=f"sales_predictions_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+
+            except Exception as e:
+                st.error(f"❌ Error reading file: {str(e)}")
+                st.exception(e)
+
+                         
+
                 
                 # Display results if available
                 if st.session_state.last_prediction_df is not None:
