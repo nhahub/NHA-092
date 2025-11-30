@@ -31,3 +31,8 @@ Thumbs.db
 # artifacts/*.json
 # artifacts/*.cbm
 # artifacts/*.pkl
+
+# MLflow
+mlruns/
+mlartifacts/
+.mlflow/
