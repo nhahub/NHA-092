@@ -1,6 +1,7 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
+import plotly.express as px
 from keras.models import load_model
 from datetime import datetime
 from pathlib import Path
@@ -515,6 +516,28 @@ elif page == "📈 Batch Forecast":
                                 with col3:
                                     st.metric("Total Predicted Sales", f"{np.sum(predictions):,.2f}")
                                 
+                                # Interactive visualization
+                                st.markdown("### 📈 Prediction Visualization")
+                                chart_df = result_df.copy()
+                                x_axis = "date" if "date" in chart_df.columns else "row"
+                                
+                                if "date" in chart_df.columns:
+                                    chart_df["date"] = pd.to_datetime(chart_df["date"], errors="coerce")
+                                    chart_df = chart_df.sort_values("date")
+                                else:
+                                    chart_df = chart_df.reset_index().rename(columns={"index": "row"})
+                                
+                                color_by = "family" if "family" in chart_df.columns else None
+                                fig = px.line(
+                                    chart_df,
+                                    x=x_axis,
+                                    y="predicted_sales",
+                                    color=color_by,
+                                    markers=True,
+                                    title="Predicted Sales"
+                                )
+                                st.plotly_chart(fig, use_container_width=True)
+
                                 # Download section
                                 st.markdown("---")
                                 st.markdown("#### 💾 Download Predictions")
